@@ -1,5 +1,7 @@
 # @trichains/hotmart-webhooks
 
+[English](README.md) · [Português](README.pt-BR.md)
+
 Typed, validated and testable Hotmart webhooks for Node.js: hottok verification, zod schemas for every v2.0.0 event, event routing with idempotency, framework adapters, fixtures and a CLI to fire fake events at your local endpoint.
 
 [![CI](https://github.com/trichains/hotmart-webhooks/actions/workflows/ci.yml/badge.svg)](https://github.com/trichains/hotmart-webhooks/actions/workflows/ci.yml)
