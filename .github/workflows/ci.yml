@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: lint, typecheck, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run test:coverage
+      - run: npm run build
+      - run: npm run typecheck:examples
+      - run: npm run check:package
+      - run: npm run smoke
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist
+          retention-days: 3
+
+  test-matrix:
+    name: test (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+  smoke-old-node:
+    # The package supports Node >= 18, but the dev toolchain (Vitest 5) needs
+    # Node 22+. Run the built package on the older runtimes with a plain script.
+    name: smoke (Node ${{ matrix.node }})
+    needs: check
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [18, 20]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Install only the runtime dependency in a clean folder
+        run: |
+          ZOD="$(node -p "require('./package.json').dependencies.zod")"
+          mkdir -p "$RUNNER_TEMP/smoke"
+          cp -r dist scripts "$RUNNER_TEMP/smoke/"
+          cd "$RUNNER_TEMP/smoke"
+          echo "{\"type\":\"module\",\"private\":true}" > package.json
+          npm install --ignore-scripts --no-audit --no-fund "zod@$ZOD"
+          node scripts/smoke.mjs
