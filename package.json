@@ -1,0 +1,143 @@
+{
+  "name": "@trichains/hotmart-webhooks",
+  "version": "0.1.0",
+  "description": "Typed, validated and testable Hotmart webhooks (v2.0.0) for Node.js: hottok verification, zod schemas, event routing, idempotency, fixtures and a CLI.",
+  "keywords": [
+    "hotmart",
+    "webhook",
+    "webhooks",
+    "hottok",
+    "zod",
+    "typescript",
+    "payments",
+    "nextjs",
+    "express"
+  ],
+  "author": "Cristhian Almeida (https://trichains.dev)",
+  "license": "MIT",
+  "homepage": "https://github.com/trichains/hotmart-webhooks#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/trichains/hotmart-webhooks.git"
+  },
+  "bugs": {
+    "url": "https://github.com/trichains/hotmart-webhooks/issues"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18"
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.cts",
+  "typesVersions": {
+    "*": {
+      "fixtures": [
+        "./dist/fixtures/index.d.cts"
+      ],
+      "adapters/next": [
+        "./dist/adapters/next.d.cts"
+      ],
+      "adapters/node": [
+        "./dist/adapters/node.d.cts"
+      ],
+      "adapters/express": [
+        "./dist/adapters/express.d.cts"
+      ]
+    }
+  },
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./fixtures": {
+      "import": {
+        "types": "./dist/fixtures/index.d.ts",
+        "default": "./dist/fixtures/index.js"
+      },
+      "require": {
+        "types": "./dist/fixtures/index.d.cts",
+        "default": "./dist/fixtures/index.cjs"
+      }
+    },
+    "./adapters/next": {
+      "import": {
+        "types": "./dist/adapters/next.d.ts",
+        "default": "./dist/adapters/next.js"
+      },
+      "require": {
+        "types": "./dist/adapters/next.d.cts",
+        "default": "./dist/adapters/next.cjs"
+      }
+    },
+    "./adapters/node": {
+      "import": {
+        "types": "./dist/adapters/node.d.ts",
+        "default": "./dist/adapters/node.js"
+      },
+      "require": {
+        "types": "./dist/adapters/node.d.cts",
+        "default": "./dist/adapters/node.cjs"
+      }
+    },
+    "./adapters/express": {
+      "import": {
+        "types": "./dist/adapters/express.d.ts",
+        "default": "./dist/adapters/express.js"
+      },
+      "require": {
+        "types": "./dist/adapters/express.d.cts",
+        "default": "./dist/adapters/express.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "hotmart-webhooks": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "typecheck:examples": "tsc -p examples/tsconfig.json",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "check:package": "publint --strict && attw --pack .",
+    "smoke": "node scripts/smoke.mjs",
+    "changeset": "changeset",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.5",
+    "@changesets/cli": "^3.0.3",
+    "@eslint/js": "^10.0.1",
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.20.5",
+    "@vitest/coverage-v8": "^5.0.3",
+    "eslint": "^10.12.0",
+    "express": "^5.2.1",
+    "globals": "^17.13.0",
+    "publint": "^0.3.25",
+    "tsup": "^8.5.1",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.71.0",
+    "vitest": "^5.0.3"
+  }
+}
