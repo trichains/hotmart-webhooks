@@ -144,7 +144,7 @@ Adapters:
 
 | Import | Export | Signature |
 | --- | --- | --- |
-| `@trichains/hotmart-webhooks/adapters/next` | `toNextRouteHandler(handler)` (alias `toFetchHandler`) | `(request: Request) => Promise<Response>`. Works for Next.js route handlers on the Node.js runtime, Hono, Remix/React Router actions, Bun. |
+| `@trichains/hotmart-webhooks/adapters/next` | `toNextRouteHandler(handler)` (alias `toFetchHandler`) | `(request: Request) => Promise<Response>`. Made for Next.js route handlers (Node.js runtime). Any server that hands you a standard `Request` should work too (Hono, Remix/React Router actions, Bun); those are not tested here. |
 | `@trichains/hotmart-webhooks/adapters/node` | `toNodeListener(handler, { maxBodyBytes? })` | `http.createServer(toNodeListener(handler))` |
 | `@trichains/hotmart-webhooks/adapters/express` | `toExpressMiddleware(handler, { maxBodyBytes? })` | `app.post(path, toExpressMiddleware(handler))`. Uses `req.rawBody`, a Buffer/string `req.body`, a parsed JSON `req.body`, or reads the stream. |
 

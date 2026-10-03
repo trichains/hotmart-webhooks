@@ -75,6 +75,36 @@ describe("toNextRouteHandler (Web Request -> Response)", () => {
     expect(res.status).toBe(200);
   });
 
+  it("returns 413 for bodies above maxBodyBytes (declared or streamed)", async () => {
+    const POST = toNextRouteHandler(makeHandler().handler, { maxBodyBytes: 100 });
+    const declared = await POST(createFixtureRequest("PURCHASE_APPROVED", { token }));
+    expect(declared.status).toBe(413);
+
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(body));
+        controller.close();
+      },
+    });
+    const chunked = await POST(
+      new Request("http://localhost/api/hotmart", { method: "POST", body: stream, duplex: "half" } as RequestInit),
+    );
+    expect(chunked.status).toBe(413);
+    expect(await chunked.json()).toEqual({ ok: false, error: "payload_too_large" });
+  });
+
+  it("returns 400 when the body stream errors", async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.error(new Error("client went away"));
+      },
+    });
+    const res = await toNextRouteHandler(makeHandler().handler)(
+      new Request("http://localhost/api/hotmart", { method: "POST", body: stream, duplex: "half" } as RequestInit),
+    );
+    expect(res.status).toBe(400);
+  });
+
   it("returns 405 for GET", async () => {
     const res = await toNextRouteHandler(makeHandler().handler)(new Request("http://localhost/api/hotmart"));
     expect(res.status).toBe(405);
