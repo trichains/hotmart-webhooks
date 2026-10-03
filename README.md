@@ -121,10 +121,11 @@ Main entry: `@trichains/hotmart-webhooks`
 
 | Export | What it does |
 | --- | --- |
-| `createWebhookHandler(options)` | Returns `{ handle(req) }`. Options: `token`, `handlers` (`{ [EVENT]?: fn, "*"?: fn }`), `idempotency?` (`{ has(id), set(id) }`, sync or async), `onError?(error, { event })`, `logger?` (console-like), `allowQueryToken?`. A specific handler wins over `"*"`. |
+| `createWebhookHandler(options)` | Returns `{ handle(req) }`. Options: `token`, `handlers` (`{ [EVENT]?: fn, "*"?: fn }`), `idempotency?` (`{ has(id), set(id) }`, sync or async), `onError?(error, { event })`, `onInvalidPayload?(error)` (authenticated request that is not JSON or fails validation: store `error.payload` so nothing is lost), `logger?` (console-like; a throwing logger is ignored), `allowQueryToken?`. A specific handler wins over `"*"`. `handle()` never rejects. |
 | `parseWebhook(rawBody, { token, headers, query?, allowQueryToken? })` | `{ ok: true, event }` or `{ ok: false, error: { code, message, issues?, event?, payload? } }`. Codes: `invalid_token`, `invalid_json`, `invalid_payload`, `unsupported_event`. Never throws for bad input. |
-| `parseWebhookOrThrow(rawBody, options)` | Same, throws `HotmartWebhookError` (`code`, `issues`, `event`). |
+| `parseWebhookOrThrow(rawBody, options)` | Same, throws `HotmartWebhookError` (`code`, `issues`, `event`). Use `HotmartWebhookError.is(err)` rather than `instanceof` if both the ESM and CJS builds can end up loaded. |
 | `parseEvent(payload)` / `parseEventOrThrow(payload)` | Validate an already-decoded object without a token check (queue workers, stored events). |
+| `stripNulls(value)` | Copy without `null` properties. The parse functions apply it first, so a `null` optional field counts as absent; a `null` required field still fails. The raw zod schemas do not do this on their own. |
 | `verifyHottok(input, { token, allowQueryToken? })` | `boolean`. `input` can be a `Request`, `Headers`, a Node header object or `{ headers, query }`. |
 | `checkHottok(input, options)` | `{ valid: true, source: "header" \| "query" }` or `{ valid: false, reason: "missing" \| "mismatch" }`, for logging. |
 | `safeCompare(a, b)` | SHA-256 + `crypto.timingSafeEqual`. |
@@ -134,7 +135,7 @@ Main entry: `@trichains/hotmart-webhooks`
 | `normalizePurchase(event)` | Flat object: `transaction, status, event, eventId, offerCode, productId, productName, buyerEmail, buyerName, priceValue, currency, fullPriceValue, paymentType, installments, approvedAt, orderedAt, isOrderBump, parentTransaction, subscriberCode, recurrenceNumber`. Missing values are `null`. |
 | `getBuyer(event)` | `{ email?, name?, phone? }` from whatever the event calls the person (buyer, lead, subscriber, student, shopper). |
 | `getTransactionId(event)` / `getSubscriberCode(event)` | The ids you usually key your records on. |
-| `toDate(value)` | Hotmart timestamp (ms, s, numeric string or ISO) to `Date \| null`. |
+| `toDate(value)` | Hotmart timestamp (ms, s, numeric string or ISO 8601) to `Date \| null`. ISO date-times without an offset are read as UTC; anything else returns `null`. |
 | `toMinorUnits(value, currency)` / `toMinorUnits(money)` | Integer minor units with ISO 4217 decimals and half-away-from-zero rounding. `fromMinorUnits` and `currencyDecimals` too. |
 | `webhookEventSchema`, `eventSchemas[EVENT]`, sub-schemas (`purchaseSchema`, `buyerSchema`, `productSchema`, ...) | The zod schemas, if you want to compose your own. |
 | Types: `WebhookEvent`, `WebhookEventOf<"PURCHASE_APPROVED">`, `PurchaseEvent`, `PurchaseApprovedEvent`, ... | One type per event plus the union. |
@@ -181,6 +182,7 @@ According to Hotmart's help center, deliveries that fail are resent automaticall
 
 1. `has(id)` true: reply `200 { duplicate: true }` without running your handler.
 2. Otherwise run the handler, and only after it succeeds call `set(id)`. A failed handler leaves the id unmarked, so the retry runs it again.
+3. If `set(id)` itself fails after the handler succeeded, the response is still 200 (the work is done; a 500 would make Hotmart resend it and repeat the side effects). The failure is logged as `hotmart.webhook.idempotency_set_failed`.
 
 ```ts
 import { createWebhookHandler } from "@trichains/hotmart-webhooks";
@@ -228,7 +230,7 @@ describe("hotmart webhook route", () => {
 });
 ```
 
-All fixture data is fake (`@example.com` addresses, `HP00000000xx` transactions, all-zero documents). The `purchase.status` paired with each purchase event is a plausible choice; the docs do not specify it per event.
+All fixture data is fake (`@example.com` addresses, `HP00000000xx` transactions, all-zero documents). The `purchase.status` paired with each purchase event is a plausible choice; the docs do not specify it per event. The exported `fixtures` object is deeply frozen; `createFixture` returns a mutable copy. Each fixture keeps a fixed `id`, so if your handler uses an idempotency store, pass `{ id: "..." }` in the overrides to simulate distinct deliveries.
 
 ## CLI
 
@@ -262,7 +264,7 @@ Options: `--token` (or `$HOTMART_HOTTOK`), repeatable `--override path=value` (v
 ## Security notes
 
 - **Constant-time comparison.** `a === b` returns as soon as a character differs, so response times can leak how much of a guessed token is right. `safeCompare` hashes both values with SHA-256 and compares them with `crypto.timingSafeEqual`, which also hides the token length.
-- **The hottok is the only authentication.** Hotmart does not sign the body. Anyone with the token can forge events, so keep it in an environment variable, rotate it through Hotmart support if it leaks, and never log it (the handler's logs never include it). The query-string fallback is off by default because URLs end up in access logs.
+- **The hottok is the only authentication.** Hotmart does not sign the body. Anyone with the token can forge events, so keep it in an environment variable, rotate it through Hotmart support if it leaks, and never log it (the handler's logs never include it). The query-string fallback is off by default because URLs end up in access logs. Surrounding whitespace in the configured token (a trailing newline from an env file, for example) is trimmed, since a hottok never contains spaces.
 - **Do not trust `purchase.status` alone, and do not trust the event name alone.** `isApprovedPurchase` requires both to agree; the official example itself pairs `PURCHASE_APPROVED` with status `STARTED`. Events can also arrive out of order (a retried APPROVED after a REFUNDED), so keep per-transaction state and compare `creation_date` before granting access. For high-value actions, confirm with Hotmart's sales API.
 - **Reply 2xx fast and do the heavy work elsewhere.** Hotmart treats slow responses as failures (408) and resends them, and its help center says a URL that keeps failing can get the webhook configuration deactivated. Validate and enqueue in the handler (a queue, a database row, `waitUntil` on your platform), then send e-mails, call CRMs and grant access in a worker. `parseEvent` revalidates stored payloads in that worker.
 - **Body size.** All adapters stop reading at 1 MiB (`maxBodyBytes`) and answer 413.
@@ -270,9 +272,10 @@ Options: `--token` (or `$HOTMART_HOTTOK`), repeatable `--override path=value` (v
 
 ## Key decisions and trade-offs
 
-- **Loose schemas over strict ones.** Objects are `z.looseObject` and enum-like strings accept any value while keeping autocomplete for the documented ones. Hotmart's own docs disagree with their examples in several places (listed in [docs/REFERENCES.md](docs/REFERENCES.md)); rejecting a real payment because of a new enum value would be worse than accepting a field you did not expect.
+- **Loose schemas over strict ones.** Objects are `z.looseObject` and enum-like strings accept any value while keeping autocomplete for the documented ones. Hotmart's own docs disagree with their examples in several places (listed in [docs/REFERENCES.md](docs/REFERENCES.md)); rejecting a real payment because of a new enum value would be worse than accepting a field you did not expect. `null` is treated as "absent" for the same reason. The cost on the type side: loose objects carry an index signature, so a typo like `event.data.purchase.aproved_date` compiles (as `unknown`) instead of failing. Known fields are fully typed and narrowing by `event.event` works.
+- **zod as a regular dependency.** zod ships as a dependency rather than a peer so a single `npm install` is enough. If your app uses a different zod major, the exported schemas are not interchangeable with your own zod instances; the parse functions and types are unaffected.
 - **Results instead of exceptions.** `parseWebhook` returns a discriminated result so every failure mode is visible in the type and maps directly to a status code. `*OrThrow` variants exist for code that prefers exceptions.
-- **Unsupported events get 200, invalid payloads get 400.** Answering 4xx to an event name this version does not know would only produce failed deliveries; it is acknowledged and logged as `hotmart.webhook.ignored`. A known event that fails validation is different: it may be a forged or broken request, so it gets a 400 and stays visible (and resendable) in Hotmart's webhook history. The catch is that if Hotmart changes a payload in a way the schema rejects, those deliveries fail until the package is updated; watch for `hotmart.webhook.rejected` with `reason: "invalid_payload"` in your logs.
+- **Unsupported events get 200, invalid payloads get 400.** Answering 4xx to an event name this version does not know would only produce failed deliveries; it is acknowledged and logged as `hotmart.webhook.ignored`. A known event that fails validation is different: it may be a forged or broken request, so it gets a 400 and stays visible (and resendable) in Hotmart's webhook history. The catch is that if Hotmart changes a payload in a way the schema rejects, those deliveries fail until the package is updated; watch for `hotmart.webhook.rejected` with `reason: "invalid_payload"` in your logs, and use `onInvalidPayload` to keep the raw payload so it can be replayed later.
 - **Mark idempotent after success.** A crash mid-handler means the retry runs again instead of being silently swallowed. The cost is that handlers must tolerate re-execution, which they need anyway because of the has/set race.
 - **One subpath per adapter.** `adapters/next`, `adapters/node` and `adapters/express` are separate entry points so importing one does not drag in the others, and the main entry stays framework-free. They use small structural types instead of importing framework types, so there are no peer dependencies.
 - **Dual ESM/CJS build with tsup**, `sideEffects: false`, `typesVersions` for TypeScript projects still on `moduleResolution: node`. `publint` and `@arethetypeswrong/cli` run in CI.
