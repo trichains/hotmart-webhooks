@@ -1,0 +1,24 @@
+{
+  // Typechecks the examples against the BUILT package (run `npm run build` first),
+  // the same way a consumer would import it.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "types": ["node"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": false,
+    "esModuleInterop": true,
+    "verbatimModuleSyntax": true,
+    "paths": {
+      "@trichains/hotmart-webhooks": ["../dist/index.d.ts"],
+      "@trichains/hotmart-webhooks/fixtures": ["../dist/fixtures/index.d.ts"],
+      "@trichains/hotmart-webhooks/adapters/next": ["../dist/adapters/next.d.ts"],
+      "@trichains/hotmart-webhooks/adapters/node": ["../dist/adapters/node.d.ts"],
+      "@trichains/hotmart-webhooks/adapters/express": ["../dist/adapters/express.d.ts"]
+    }
+  },
+  "include": ["**/*.ts"]
+}
