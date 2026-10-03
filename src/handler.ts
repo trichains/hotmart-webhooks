@@ -1,6 +1,6 @@
 import { getEventCategory, type EventCategory, type WebhookEventName } from "./events.js";
 import type { HeadersInput, QueryInput } from "./http.js";
-import { parseWebhook, type ParseIssue, type WebhookErrorCode } from "./parse.js";
+import { parseWebhook, type ParseIssue, type WebhookErrorCode, type WebhookParseError } from "./parse.js";
 import type { WebhookEvent, WebhookEventOf } from "./schemas/index.js";
 import { _assertToken } from "./verify.js";
 
@@ -77,8 +77,14 @@ export interface CreateWebhookHandlerOptions {
   token: string;
   handlers: WebhookHandlers;
   idempotency?: IdempotencyStore;
-  /** Called when a handler (or the idempotency store) throws. The response is a 500 so Hotmart retries. */
+  /** Called when a handler (or the idempotency store lookup) throws. The response is a 500 so Hotmart resends it. */
   onError?: (error: unknown, info: { event?: WebhookEvent }) => void | Promise<void>;
+  /**
+   * Called when an authenticated request fails validation (400 `invalid_payload`)
+   * or is not JSON. Use it to store the raw payload so a Hotmart schema change does
+   * not lose events. Errors thrown here are logged and ignored.
+   */
+  onInvalidPayload?: (error: WebhookParseError) => void | Promise<void>;
   logger?: WebhookLogger;
   /** Accept the legacy `?hottok=` query parameter. Off by default. */
   allowQueryToken?: boolean;
@@ -95,18 +101,39 @@ const STATUS_BY_CODE: Record<WebhookErrorCode, number> = {
   unsupported_event: 200,
 };
 
+const MAX_LOGGED_ISSUES = 10;
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** Wrap a user logger so a throwing logger can never break request handling. */
+function safeLogger(logger: WebhookLogger | undefined): Required<WebhookLogger> {
+  const wrap =
+    (level: keyof WebhookLogger) =>
+    (message: string, fields?: Record<string, unknown>): void => {
+      try {
+        logger?.[level]?.(message, fields);
+      } catch {
+        // Logging must never change the response.
+      }
+    };
+  return { debug: wrap("debug"), info: wrap("info"), warn: wrap("warn"), error: wrap("error") };
+}
+
 /**
  * Build a framework-agnostic webhook handler. Wire it to your framework with
  * one of the adapters (`/adapters/next`, `/adapters/node`, `/adapters/express`)
  * or call `handle()` yourself.
  *
  * Status codes: 200 processed / duplicate / ignored, 400 bad body,
- * 401 bad or missing token, 405 wrong method, 500 handler failure (Hotmart retries).
+ * 401 bad or missing token, 405 wrong method, 500 handler failure (Hotmart resends).
+ * `handle()` does not reject: every failure is mapped to a response.
  */
 export function createWebhookHandler(options: CreateWebhookHandlerOptions): WebhookHandler {
   _assertToken(options?.token);
-  const { token, handlers, idempotency, onError, allowQueryToken = false } = options;
-  const logger: WebhookLogger = options.logger ?? {};
+  const { token, handlers, idempotency, onError, onInvalidPayload, allowQueryToken = false } = options;
+  const logger = safeLogger(options.logger);
 
   async function handle(request: WebhookRequest): Promise<WebhookResponse> {
     const receivedAt = new Date();
@@ -125,10 +152,26 @@ export function createWebhookHandler(options: CreateWebhookHandlerOptions): Webh
     if (!parsed.ok) {
       const { code, issues, event } = parsed.error;
       if (code === "unsupported_event") {
-        logger.info?.("hotmart.webhook.ignored", { reason: code, event });
+        logger.info("hotmart.webhook.ignored", { reason: code, event });
         return { status: 200, body: { ok: true, ...(event ? { event } : {}), ignored: "unsupported_event" } };
       }
-      logger.warn?.("hotmart.webhook.rejected", { reason: code, event, issues: issues?.length });
+      logger.warn("hotmart.webhook.rejected", {
+        reason: code,
+        event,
+        ...(issues
+          ? {
+              issueCount: issues.length,
+              issues: issues.slice(0, MAX_LOGGED_ISSUES).map((i) => `${i.path.join(".")}: ${i.message}`),
+            }
+          : {}),
+      });
+      if (code !== "invalid_token" && onInvalidPayload) {
+        try {
+          await onInvalidPayload(parsed.error);
+        } catch (hookError) {
+          logger.error("hotmart.webhook.on_invalid_payload_failed", { error: errorMessage(hookError) });
+        }
+      }
       return {
         status: STATUS_BY_CODE[code],
         body: issues ? { ok: false, error: code, issues } : { ok: false, error: code },
@@ -140,38 +183,39 @@ export function createWebhookHandler(options: CreateWebhookHandlerOptions): Webh
 
     try {
       if (idempotency && (await idempotency.has(event.id))) {
-        logger.info?.("hotmart.webhook.duplicate", meta);
+        logger.info("hotmart.webhook.duplicate", meta);
         return { status: 200, body: { ok: true, ...meta, duplicate: true } };
       }
 
       const specific = handlers[event.event] as WildcardHandler | undefined;
       const fn = specific ?? handlers["*"];
       if (!fn) {
-        logger.info?.("hotmart.webhook.ignored", { ...meta, reason: "no_handler" });
+        logger.info("hotmart.webhook.ignored", { ...meta, reason: "no_handler" });
         return { status: 200, body: { ok: true, ...meta, ignored: "no_handler" } };
       }
 
       const ctx: HandlerContext = { category: getEventCategory(event.event), receivedAt, logger };
       await fn(event, ctx);
-      await idempotency?.set(event.id);
-
-      logger.info?.("hotmart.webhook.processed", { ...meta, durationMs: Date.now() - receivedAt.getTime() });
-      return { status: 200, body: { ok: true, ...meta } };
     } catch (error) {
-      logger.error?.("hotmart.webhook.failed", {
-        ...meta,
-        error: error instanceof Error ? error.message : String(error),
-      });
+      logger.error("hotmart.webhook.failed", { ...meta, error: errorMessage(error) });
       try {
         await onError?.(error, { event });
       } catch (hookError) {
-        logger.error?.("hotmart.webhook.on_error_failed", {
-          ...meta,
-          error: hookError instanceof Error ? hookError.message : String(hookError),
-        });
+        logger.error("hotmart.webhook.on_error_failed", { ...meta, error: errorMessage(hookError) });
       }
       return { status: 500, body: { ok: false, error: "handler_error" } };
     }
+
+    // The work is done at this point. Failing to record it must not trigger a
+    // resend (which would run the side effects again), so it is only logged.
+    try {
+      await idempotency?.set(event.id);
+    } catch (error) {
+      logger.error("hotmart.webhook.idempotency_set_failed", { ...meta, error: errorMessage(error) });
+    }
+
+    logger.info("hotmart.webhook.processed", { ...meta, durationMs: Date.now() - receivedAt.getTime() });
+    return { status: 200, body: { ok: true, ...meta } };
   }
 
   return { handle };

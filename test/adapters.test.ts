@@ -75,10 +75,11 @@ describe("toNextRouteHandler (Web Request -> Response)", () => {
     expect(res.status).toBe(200);
   });
 
-  it("returns 413 for bodies above maxBodyBytes (declared or streamed)", async () => {
+  it("returns 413 for bodies above maxBodyBytes (no content-length, string or stream body)", async () => {
     const POST = toNextRouteHandler(makeHandler().handler, { maxBodyBytes: 100 });
-    const declared = await POST(createFixtureRequest("PURCHASE_APPROVED", { token }));
-    expect(declared.status).toBe(413);
+    // A string body in undici has no content-length header, so this exercises the streaming limit.
+    const fromString = await POST(createFixtureRequest("PURCHASE_APPROVED", { token }));
+    expect(fromString.status).toBe(413);
 
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {

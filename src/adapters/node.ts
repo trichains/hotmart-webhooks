@@ -1,4 +1,4 @@
-import type { WebhookHandler } from "../handler.js";
+import type { WebhookHandler, WebhookResponse } from "../handler.js";
 import { queryFromUrl } from "../http.js";
 import {
   BodyTooLargeError,
@@ -35,12 +35,18 @@ export function toNodeListener(
     }
 
     const query = queryFromUrl(req.url);
-    const response = await handler.handle({
-      headers: req.headers,
-      rawBody,
-      ...(query ? { query } : {}),
-      ...(req.method ? { method: req.method } : {}),
-    });
+    let response: WebhookResponse;
+    try {
+      response = await handler.handle({
+        headers: req.headers,
+        rawBody,
+        ...(query ? { query } : {}),
+        ...(req.method ? { method: req.method } : {}),
+      });
+    } catch {
+      // createWebhookHandler never rejects, but a custom WebhookHandler might.
+      response = { status: 500, body: { ok: false, error: "handler_error" } };
+    }
     sendNode(res, response);
   };
 }

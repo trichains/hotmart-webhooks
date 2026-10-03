@@ -109,20 +109,30 @@ export function getSubscriberCode(event: WebhookEvent): string | undefined {
   }
 }
 
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/;
+
 /**
- * Convert a Hotmart timestamp to a `Date`. Numbers and numeric strings are
- * treated as milliseconds, except values below 1e11, which are read as seconds
- * (the switch-plan docs say "unix timestamp"). ISO strings are parsed as-is.
- * Returns `null` for missing or unparseable values.
+ * Convert a Hotmart timestamp to a `Date`.
+ *
+ * - Numbers and numeric strings are milliseconds, except values below 1e11,
+ *   which are read as seconds (the switch-plan docs say "unix timestamp").
+ * - ISO 8601 strings are parsed; a date-time without an offset (e.g. the
+ *   FlexPay "2025-03-15T00:00:00") is read as UTC, not as the server's local time.
+ * - Anything else, zero, negative or missing values return `null`.
  */
 export function toDate(value: number | string | null | undefined): Date | null {
-  if (value === null || value === undefined || value === "") return null;
+  if (value === null || value === undefined) return null;
   let ms: number;
   if (typeof value === "number" || /^\d+(\.\d+)?$/.test(value)) {
     const n = Number(value);
+    if (!(n > 0)) return null;
     ms = n < 1e11 ? n * 1000 : n;
   } else {
-    ms = Date.parse(value);
+    const match = ISO_DATE.exec(value);
+    if (!match) return null;
+    const hasTime = value.length > 10;
+    const iso = value.replace(" ", "T");
+    ms = Date.parse(hasTime && !match[1] ? `${iso}Z` : iso);
   }
   const date = new Date(ms);
   return Number.isNaN(date.getTime()) ? null : date;

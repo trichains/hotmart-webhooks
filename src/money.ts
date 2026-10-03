@@ -68,6 +68,9 @@ export function toMinorUnits(valueOrMoney: number | Money, currency?: string): n
 
   const shifted = shift(Math.abs(value), currencyDecimals(code));
   const rounded = Math.round(shifted);
+  if (!Number.isSafeInteger(rounded)) {
+    throw new RangeError(`toMinorUnits: ${value} ${code} does not fit in a safe integer`);
+  }
   return value < 0 && rounded !== 0 ? -rounded : rounded;
 }
 

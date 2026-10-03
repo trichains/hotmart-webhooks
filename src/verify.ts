@@ -60,7 +60,7 @@ function splitInput(input: VerifyInput): { headers: HeadersInput; query?: QueryI
 }
 
 function assertToken(token: unknown): asserts token is string {
-  if (typeof token !== "string" || token.length === 0) {
+  if (typeof token !== "string" || token.trim().length === 0) {
     throw new TypeError("hotmart-webhooks: `token` must be a non-empty string (your Hotmart hottok).");
   }
 }
@@ -71,19 +71,22 @@ function assertToken(token: unknown): asserts token is string {
  */
 export function checkHottok(input: VerifyInput, options: VerifyHottokOptions): VerifyHottokResult {
   assertToken(options?.token);
+  // Tokens copied into env files often carry a trailing newline or space; a
+  // hottok never contains whitespace, so trimming avoids a silent 401 on every request.
+  const expected = options.token.trim();
   const { headers, query } = splitInput(input);
 
-  const fromHeader = getHeader(headers, HOTTOK_HEADER);
+  const fromHeader = getHeader(headers, HOTTOK_HEADER)?.trim();
   if (fromHeader !== undefined && fromHeader !== "") {
-    return safeCompare(fromHeader, options.token)
+    return safeCompare(fromHeader, expected)
       ? { valid: true, source: "header" }
       : { valid: false, reason: "mismatch" };
   }
 
   if (options.allowQueryToken) {
-    const fromQuery = getQueryParam(query, HOTTOK_QUERY_PARAM);
+    const fromQuery = getQueryParam(query, HOTTOK_QUERY_PARAM)?.trim();
     if (fromQuery !== undefined && fromQuery !== "") {
-      return safeCompare(fromQuery, options.token)
+      return safeCompare(fromQuery, expected)
         ? { valid: true, source: "query" }
         : { valid: false, reason: "mismatch" };
     }

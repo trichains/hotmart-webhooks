@@ -50,6 +50,17 @@ export class HotmartWebhookError extends Error {
     this.issues = error.issues;
     this.event = error.event;
   }
+
+  /**
+   * `instanceof` can fail when the ESM and CJS builds are both loaded (dual
+   * package hazard); this checks the shape instead.
+   */
+  static is(error: unknown): error is HotmartWebhookError {
+    return (
+      error instanceof HotmartWebhookError ||
+      (error instanceof Error && error.name === "HotmartWebhookError" && typeof (error as { code?: unknown }).code === "string")
+    );
+  }
 }
 
 function toIssues(issues: readonly z.core.$ZodIssue[]): ParseIssue[] {
@@ -60,6 +71,22 @@ function toIssues(issues: readonly z.core.$ZodIssue[]): ParseIssue[] {
   }));
 }
 
+/**
+ * Return a copy of `value` with every `null` object property removed.
+ * Hotmart sends `null` for fields it has no value for (phone, coupon, document,
+ * ...); the schemas model those as optional, so `null` is treated as "absent".
+ * Nulls inside arrays are kept. Required fields that are `null` still fail.
+ */
+export function stripNulls<T>(value: T): T {
+  if (Array.isArray(value)) return value.map((item) => (item === null ? item : stripNulls(item))) as T;
+  if (typeof value !== "object" || value === null) return value;
+  const out: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (child !== null) out[key] = stripNulls(child);
+  }
+  return out as T;
+}
+
 function fail(error: WebhookParseError): ParseResult {
   return { ok: false, error };
 }
@@ -67,6 +94,7 @@ function fail(error: WebhookParseError): ParseResult {
 /**
  * Validate an already-decoded payload (no token check). Use it when the token
  * was verified elsewhere, e.g. in a queue worker processing stored events.
+ * `null` properties are treated as absent (see `stripNulls`).
  */
 export function parseEvent(payload: unknown): ParseResult {
   if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
@@ -92,7 +120,7 @@ export function parseEvent(payload: unknown): ParseResult {
     });
   }
 
-  const result = webhookEventSchema.safeParse(payload);
+  const result = webhookEventSchema.safeParse(stripNulls(payload));
   if (!result.success) {
     return fail({
       code: "invalid_payload",

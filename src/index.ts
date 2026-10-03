@@ -49,6 +49,7 @@ export {
   parseEventOrThrow,
   parseWebhook,
   parseWebhookOrThrow,
+  stripNulls,
   type ParseIssue,
   type ParseResult,
   type ParseWebhookOptions,

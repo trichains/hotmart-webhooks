@@ -20,6 +20,11 @@ export interface ExpressRequestLike extends NodeRequestLike {
   /** `express.raw()` gives a Buffer, `express.text()` a string, `express.json()` an object. */
   body?: unknown;
   originalUrl?: string;
+  /** Node stream state: true once a body parser has consumed the request. */
+  readableEnded?: boolean;
+  complete?: boolean;
+  /** Set by body-parser 1.x (Express 4) after it parsed the body. */
+  _body?: boolean;
 }
 
 export type NextFunctionLike = (error?: unknown) => void;
@@ -33,7 +38,11 @@ async function resolveBody(req: ExpressRequestLike, limit: number): Promise<Uint
   if (isBytes(req.body) || typeof req.body === "string") return req.body;
   // Body already parsed by express.json(). Hotmart does not sign the body (the
   // hottok is a static header), so re-serialising does not weaken verification.
-  if (req.body !== undefined && req.body !== null && typeof req.body === "object") {
+  // body-parser 1.x sets `req.body = {}` even when it skipped the request (e.g.
+  // express.raw() with a non-matching type), so only trust an object body when
+  // the stream was actually consumed.
+  const consumed = req._body === true || req.readableEnded === true || req.complete === true;
+  if (consumed && req.body !== undefined && req.body !== null && typeof req.body === "object") {
     return JSON.stringify(req.body);
   }
   return readNodeBody(req, limit);

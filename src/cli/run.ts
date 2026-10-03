@@ -75,6 +75,7 @@ async function send(io: CliIo, cmd: Extract<CliCommand, { command: "send" }>): P
   if (data?.purchase?.transaction) io.stdout(`   tx    ${data.purchase.transaction}\n`);
 
   let response: Response;
+  let text: string;
   try {
     response = await io.fetch(url.toString(), {
       method: "POST",
@@ -82,6 +83,8 @@ async function send(io: CliIo, cmd: Extract<CliCommand, { command: "send" }>): P
       body,
       signal: AbortSignal.timeout(cmd.timeoutMs),
     });
+    // Inside the try: the timeout signal also covers reading the body.
+    text = await response.text();
   } catch (error) {
     const cause = (error as { cause?: { code?: string; message?: string } }).cause;
     const detail = cause?.code ?? cause?.message;
@@ -89,7 +92,6 @@ async function send(io: CliIo, cmd: Extract<CliCommand, { command: "send" }>): P
     return 1;
   }
 
-  const text = await response.text();
   io.stdout(`<- ${response.status} ${response.statusText} (${now() - started} ms)\n`);
   if (text) io.stdout(`${text}\n`);
   return response.ok ? 0 : 1;

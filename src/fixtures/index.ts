@@ -112,8 +112,21 @@ const subscription = {
   subscriber: { code: "SUB00001" },
 };
 
-/** One fixture per supported event. Treat as read-only; use `createFixture` to get a copy. */
-export const fixtures: { readonly [E in WebhookEventName]: WebhookEventOf<E> } = {
+function deepFreeze<T>(value: T): T {
+  if (typeof value === "object" && value !== null && !Object.isFrozen(value)) {
+    for (const child of Object.values(value)) deepFreeze(child);
+    Object.freeze(value);
+  }
+  return value;
+}
+
+/**
+ * One fixture per supported event. Deeply frozen so one test cannot leak changes
+ * into another; use `createFixture` for a mutable copy. Each fixture has a fixed
+ * `id`, so with an idempotency store the second delivery is a duplicate: pass
+ * `{ id: "..." }` in the overrides when you need distinct deliveries.
+ */
+export const fixtures: { readonly [E in WebhookEventName]: WebhookEventOf<E> } = deepFreeze({
   PURCHASE_APPROVED: purchaseEvent("PURCHASE_APPROVED", 1, {}),
   PURCHASE_COMPLETE: purchaseEvent("PURCHASE_COMPLETE", 2, { status: "COMPLETE" }),
   PURCHASE_CANCELED: purchaseEvent("PURCHASE_CANCELED", 3, {
@@ -295,7 +308,7 @@ export const fixtures: { readonly [E in WebhookEventName]: WebhookEventOf<E> } =
       fulfillment_service: { service_type: "MANUAL" },
     },
   },
-};
+});
 
 /** Names of every event that has a fixture (all supported events). */
 export const fixtureEventNames = Object.keys(fixtures) as WebhookEventName[];
