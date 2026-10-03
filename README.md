@@ -95,7 +95,7 @@ The core (`handle`) is a plain async function from `{ headers, rawBody, query, m
 | 400 | body is not JSON or does not match the event schema | shown as failed in the webhook history |
 | 401 | hottok missing or wrong | shown as failed |
 | 405 | method other than POST | |
-| 413 | body over 1 MiB (node/express adapters, configurable) | |
+| 413 | body over 1 MiB (all adapters, `maxBodyBytes` to change) | |
 | 500 | your handler or the idempotency store threw | resent (up to five automatic attempts) |
 
 ```
@@ -144,7 +144,7 @@ Adapters:
 
 | Import | Export | Signature |
 | --- | --- | --- |
-| `@trichains/hotmart-webhooks/adapters/next` | `toNextRouteHandler(handler)` (alias `toFetchHandler`) | `(request: Request) => Promise<Response>`. Made for Next.js route handlers (Node.js runtime). Any server that hands you a standard `Request` should work too (Hono, Remix/React Router actions, Bun); those are not tested here. |
+| `@trichains/hotmart-webhooks/adapters/next` | `toNextRouteHandler(handler, { maxBodyBytes? })` (alias `toFetchHandler`) | `(request: Request) => Promise<Response>`. Made for Next.js route handlers (Node.js runtime). Any server that hands you a standard `Request` should work too (Hono, Remix/React Router actions, Bun); those are not tested here. |
 | `@trichains/hotmart-webhooks/adapters/node` | `toNodeListener(handler, { maxBodyBytes? })` | `http.createServer(toNodeListener(handler))` |
 | `@trichains/hotmart-webhooks/adapters/express` | `toExpressMiddleware(handler, { maxBodyBytes? })` | `app.post(path, toExpressMiddleware(handler))`. Uses `req.rawBody`, a Buffer/string `req.body`, a parsed JSON `req.body`, or reads the stream. |
 
@@ -265,7 +265,7 @@ Options: `--token` (or `$HOTMART_HOTTOK`), repeatable `--override path=value` (v
 - **The hottok is the only authentication.** Hotmart does not sign the body. Anyone with the token can forge events, so keep it in an environment variable, rotate it through Hotmart support if it leaks, and never log it (the handler's logs never include it). The query-string fallback is off by default because URLs end up in access logs.
 - **Do not trust `purchase.status` alone, and do not trust the event name alone.** `isApprovedPurchase` requires both to agree; the official example itself pairs `PURCHASE_APPROVED` with status `STARTED`. Events can also arrive out of order (a retried APPROVED after a REFUNDED), so keep per-transaction state and compare `creation_date` before granting access. For high-value actions, confirm with Hotmart's sales API.
 - **Reply 2xx fast and do the heavy work elsewhere.** Hotmart treats slow responses as failures (408) and resends them, and its help center says a URL that keeps failing can get the webhook configuration deactivated. Validate and enqueue in the handler (a queue, a database row, `waitUntil` on your platform), then send e-mails, call CRMs and grant access in a worker. `parseEvent` revalidates stored payloads in that worker.
-- **Body size.** The Node and Express adapters stop reading at 1 MiB (`maxBodyBytes`) and answer 413.
+- **Body size.** All adapters stop reading at 1 MiB (`maxBodyBytes`) and answer 413.
 - **Runtime.** Token comparison uses `node:crypto`, so the Next.js adapter needs the Node.js runtime (`export const runtime = "nodejs"`), not Edge.
 
 ## Key decisions and trade-offs
